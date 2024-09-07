@@ -1,9 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+interface ICoFinance {
+    function calculateInterest(uint256 amount) external view returns (uint256);
+    function SWAP_FEE_PERCENT() external view returns (uint256);
+    function APR_7_DAYS() external view returns (uint256);
+    function APR_14_DAYS() external view returns (uint256);
+    function APR_21_DAYS() external view returns (uint256);
+    function SECONDS_IN_7_DAYS() external view returns (uint256);
+    function SECONDS_IN_14_DAYS() external view returns (uint256);
+    function SECONDS_IN_21_DAYS() external view returns (uint256);
+    function rewardToken() external view returns (address);
+}
+
 contract Staking {
     using SafeMath for uint256;
-
     uint256 public immutable APR_7_DAYS = 20; // 20% APR for 7 days
     uint256 public immutable APR_14_DAYS = 30; // 30% APR for 14 days
     uint256 public immutable APR_21_DAYS = 50; // 50% APR for 21 days
@@ -55,7 +69,11 @@ contract Staking {
         uint256 stakingDuration = block.timestamp - stakingStartTimes[staker];
         
         uint256 apr = getAPRForDuration(stakingDuration);
-        uint256 newReward = stakerBalance.mul(apr).div(100).mul(stakingDuration).div(365 days);
+        uint256 newReward = stakerBalance
+            .mul(apr)
+            .div(100)
+            .mul(stakingDuration)
+            .div(365 days);
 
         rewardBalances[staker] = rewardBalances[staker].add(newReward);
         stakingStartTimes[staker] = block.timestamp;
