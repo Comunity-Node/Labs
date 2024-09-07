@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./CoFinance.sol"; 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./CoFinance.sol";
+import "./LiquidityToken.sol";
+import "./Staking.sol";
 
 contract CoFinanceFactory {
     uint256 public creationFee  = 10;
