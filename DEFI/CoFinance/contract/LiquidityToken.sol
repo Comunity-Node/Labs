@@ -1,3 +1,12 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+// Import the OpenZeppelin ERC20 contract
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+// The LiquidityToken contract inherits from ERC20 and uses SafeERC20 for safe operations
 contract LiquidityToken is ERC20 {
     using SafeERC20 for IERC20;
 
@@ -13,6 +22,7 @@ contract LiquidityToken is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {
         owner = msg.sender;
     }
+
     function mint(address account, uint256 amount) external onlyCoFinance {
         _mint(account, amount);
     }
