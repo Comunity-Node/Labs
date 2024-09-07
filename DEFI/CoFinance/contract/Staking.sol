@@ -2,71 +2,78 @@
 pragma solidity ^0.8.0;
 
 contract Staking {
-    mapping(address => uint256) public stakedBalances;
-    mapping(address => uint256) public stakingDurations;
-    mapping(address => uint256) public stakingTimestamps;
+    using SafeMath for uint256;
 
-    uint256 public totalStaked = 0;
-    uint256 public totalStakedAmmount;
-    address[] public stakers;
+    uint256 public immutable APR_7_DAYS = 20; // 20% APR for 7 days
+    uint256 public immutable APR_14_DAYS = 30; // 30% APR for 14 days
+    uint256 public immutable APR_21_DAYS = 50; // 50% APR for 21 days
+    uint256 public constant SECONDS_IN_7_DAYS = 7 days;
+    uint256 public constant SECONDS_IN_14_DAYS = 14 days;
+    uint256 public constant SECONDS_IN_21_DAYS = 21 days;
 
+    IERC20 public liquidityToken;
+    ICoFinance public coFinance;
+    bool public isPoolIncentivized;
 
-    event Staked(address indexed staker, uint256 amount, uint256 duration);
-    event Unstaked(address indexed staker, uint256 amount);
-    event RewardsClaimed(address indexed staker, uint256 amount);
+    mapping(address => uint256) public stakerBalances;
+    mapping(address => uint256) public stakingStartTimes;
+    mapping(address => uint256) public rewardBalances;
 
-    function stake(address ,uint256 amount, uint256 duration) external {
+    constructor(address _liquidityToken, address _coFinance) {
+        liquidityToken = IERC20(_liquidityToken);
+        coFinance = ICoFinance(_coFinance);
+    }
+
+    function stake(uint256 amount) external {
         require(amount > 0, "Amount must be greater than 0");
-        if (stakedBalances[msg.sender] == 0) {
-            stakers.push(msg.sender); // Add staker to the list if not already staking
-        }
-        stakedBalances[msg.sender] += amount;
-        stakingDurations[msg.sender] = duration;
-        stakingTimestamps[msg.sender] = block.timestamp;
-        totalStaked += 1;
-        totalStakedAmmount += amount; // Update total staked amount
-        emit Staked(msg.sender, amount, duration);
+        liquidityToken.transferFrom(msg.sender, address(this), amount);
+        updateRewards(msg.sender);
+        stakerBalances[msg.sender] = stakerBalances[msg.sender].add(amount);
+        stakingStartTimes[msg.sender] = block.timestamp;
+        updateIncentives();
     }
 
-    function unstake(address ,uint256 amount) external {
-        require(amount > 0, "Amount must be greater than 0");
-        require(stakedBalances[msg.sender] >= amount, "Insufficient staked balance");
-        stakedBalances[msg.sender] -= amount;
-        if (stakedBalances[msg.sender] == 0) {
-            removeStaker(msg.sender); // Remove staker from the list if no more stake
-        }
-        emit Unstaked(msg.sender, amount);
+    function withdraw(uint256 amount) external {
+        require(stakerBalances[msg.sender] >= amount, "Insufficient balance");
+        updateRewards(msg.sender);
+        stakerBalances[msg.sender] = stakerBalances[msg.sender].sub(amount);
+        liquidityToken.transfer(msg.sender, amount);
+        updateIncentives();
     }
 
-    function getStakerByIndex(uint256 index) external view returns (address) {
-        require(index < stakers.length, "Index out of bounds");
-        return stakers[index];
+    function claimReward() external {
+        updateRewards(msg.sender);
+        uint256 reward = rewardBalances[msg.sender];
+        require(reward > 0, "No rewards to claim");
+        rewardBalances[msg.sender] = 0;
+        IERC20 rewardToken = IERC20(coFinance.rewardToken());
+        rewardToken.transfer(msg.sender, reward);
     }
 
-    function stakedBalance(address staker) external view returns (uint256) {
-        return stakedBalances[staker];
+    function updateRewards(address staker) internal {
+        uint256 stakerBalance = stakerBalances[staker];
+        uint256 stakingDuration = block.timestamp - stakingStartTimes[staker];
+        
+        uint256 apr = getAPRForDuration(stakingDuration);
+        uint256 newReward = stakerBalance.mul(apr).div(100).mul(stakingDuration).div(365 days);
+
+        rewardBalances[staker] = rewardBalances[staker].add(newReward);
+        stakingStartTimes[staker] = block.timestamp;
     }
 
-    function stakingDuration(address staker) external view returns (uint256) {
-        return stakingDurations[staker];
-    }
-
-    function getTotalStaked() external view returns (uint256) {
-        return totalStaked;
-    }
-
-    function getTotalStakedAmmount() external view returns (uint256) {
-        return totalStakedAmmount;
-    }
-
-    function removeStaker(address staker) internal {
-        for (uint256 i = 0; i < stakers.length; i++) {
-            if (stakers[i] == staker) {
-                stakers[i] = stakers[stakers.length - 1];
-                stakers.pop();
-                break;
-            }
+    function getAPRForDuration(uint256 duration) internal view returns (uint256) {
+        if (duration <= SECONDS_IN_7_DAYS) {
+            return APR_7_DAYS;
+        } else if (duration <= SECONDS_IN_14_DAYS) {
+            return APR_14_DAYS;
+        } else if (duration <= SECONDS_IN_21_DAYS) {
+            return APR_21_DAYS;
+        } else {
+            return 0;
         }
     }
 
+    function updateIncentives() internal {
+        isPoolIncentivized = liquidityToken.balanceOf(address(this)) > 0;
+    }
 }
