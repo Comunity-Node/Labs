@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "./Interface/ICollateralLockPool.sol";
 import "./Interface/ILiquidityToken.sol";
@@ -12,6 +13,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 contract CoFinance is ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using SafeMath for uint256;
     IERC20 public tokenA;
     IERC20 public tokenB;
     ILiquidityToken public liquidityToken;
@@ -101,7 +103,7 @@ contract CoFinance is ReentrancyGuard {
         _;
     }
 
-    function swapTokens(address tokenAddress, uint256 tokenAmount) external {
+     function swapTokens(address tokenAddress, uint256 tokenAmount) external {
         require(tokenAmount != 0, "Token amount must be greater than 0");
         uint256 totalFee = tokenAmount * swapFeePercent / 1000; // 0.5%
         uint256 factoryFee = totalFee * 10 / 100; 
@@ -114,20 +116,21 @@ contract CoFinance is ReentrancyGuard {
             uint256 tokenBAmount = amountAfterFee * priceTokenA / priceTokenB;
             tokenA.safeTransferFrom(msg.sender, _thisAddress, tokenAmount);
             tokenA.safeTransfer(factory, factoryFee);
-            distributeSwapFees(poolReward, true);
+            distributeFees(poolReward, true);
             tokenB.safeTransfer(msg.sender, tokenBAmount);
             emit TokensSwapped(msg.sender, tokenAmount, tokenBAmount, factoryFee);
         } else if (tokenAddress == address(tokenB)) {
             uint256 tokenAAmount = amountAfterFee * priceTokenB / priceTokenA;
             tokenB.safeTransferFrom(msg.sender, _thisAddress, tokenAmount);
             tokenB.safeTransfer(factory, factoryFee);
-            distributeSwapFees(poolReward, false);
+            distributeFees(poolReward, false);
             tokenA.safeTransfer(msg.sender, tokenAAmount);
             emit TokensSwapped(msg.sender, tokenAmount, tokenAAmount, factoryFee);
         } else {
             revert("Invalid token address");
         }
     }
+
 
     function depositCollateral(address tokenAddress, uint256 amount) external {
         require((tokenAddress == address(tokenA) || tokenAddress == address(tokenB)) && amount != 0, "Invalid input");
@@ -170,7 +173,6 @@ contract CoFinance is ReentrancyGuard {
         uint256 priceA = priceFeed.getTokenAPrice();
         uint256 priceB = priceFeed.getTokenBPrice();
         require(priceA != 0 && priceB != 0, "Price feed error");
-
         uint256 collateralValueInUSD;
         uint256 amountInUSD;
         if (borrowedToken[msg.sender] == address(tokenA)) {
@@ -198,23 +200,29 @@ contract CoFinance is ReentrancyGuard {
     borrowed[msg.sender] += amount;
     loanStartTime[msg.sender] = block.timestamp;
     loanDuration[msg.sender] = duration;
-
     emit TokensBorrowed(msg.sender, amount, borrowedToken[msg.sender], duration);
     }
 
     function repayLoan(uint256 amount) external {
         require(amount != 0, "Amount must be greater than 0");
         require(borrowed[msg.sender] >= amount, "Repayment exceeds borrowed amount");
+        
+        bool isTokenA = borrowedToken[msg.sender] == address(tokenA);
+        require(borrowedToken[msg.sender] != address(0), "No token borrowed");
+        
         uint256 principalRepayment = amount;
         uint256 interest = calculateInterest(principalRepayment, loanStartTime[msg.sender], loanDuration[msg.sender]);
         uint256 totalRepayment = principalRepayment + interest;
+        
         IERC20(borrowedToken[msg.sender]).safeTransferFrom(msg.sender, address(this), totalRepayment);
         borrowed[msg.sender] -= principalRepayment;
-        distributeInterestFees(interest);
+        distributeFees(interest, isTokenA);
+        
         if (borrowed[msg.sender] == 0) {
             releaseCollateral();
         }
-        emit LoanRepaid(msg.sender, principalRepayment);
+
+    emit LoanRepaid(msg.sender, principalRepayment);
     }
 
     function releaseCollateral() internal {
@@ -246,56 +254,41 @@ contract CoFinance is ReentrancyGuard {
         return interest;
     }
 
-    function distributeSwapFees(uint256 amount, bool isTokenA) internal {
-        uint256 ownerFee = amount * ownerSharePercent / 100;
-        uint256 poolFee = amount - ownerFee;
-        if (isTokenA) {
-            totalSwapFeesA += poolFee;
-        } else {
-            totalSwapFeesB += poolFee;
-        }
-        IERC20(isTokenA ? address(tokenA) : address(tokenB)).safeTransfer(owner, ownerFee);
-    }
-
-    function distributeInterestFees(uint256 amount) internal {
-        uint256 ownerShare = amount * ownerSharePercent / 100; // Owner's share of interest fees
-        uint256 poolShare = amount - ownerShare; // Remaining share for the fee pool
-        rewardToken.safeTransfer(owner, ownerShare);
-        if (borrowedToken[msg.sender] == address(tokenA)) {
-            totalSwapFeesA += poolShare;
-        } else {
-            totalSwapFeesB += poolShare;
+    function distributeFees(uint256 amount, bool isTokenA) internal {
+        uint256 userFeeShare;
+        if (totalLiquidity > 0) {
+            userFeeShare = amount * userLiquidityBalance[msg.sender] / totalLiquidity;
+            if (isTokenA) {
+                userSwapFees[msg.sender] += userFeeShare;
+                totalSwapFeesA -= userFeeShare;
+            } else {
+                userSwapFees[msg.sender] += userFeeShare;
+                totalSwapFeesB -= userFeeShare;
+            }
         }
     }
 
-    function claimSwapFees() external {
+    function claimFees() external {
         uint256 userLiquidity = userLiquidityBalance[msg.sender];
-        require(userLiquidity > 0, "No liquidity provided");
-
+        require(userLiquidity != 0, "No liquidity provided");
         uint256 totalFees = totalSwapFeesA + totalSwapFeesB;
-        uint256 userShare = userLiquidity * totalFees / totalLiquidity;
-
-        require(userShare > 0, "No fees to claim");
-
-        uint256 userFeeA = totalSwapFeesA * userShare / totalFees;
-        uint256 userFeeB = totalSwapFeesB * userShare / totalFees;
-
-        if (userFeeA > 0) {
+        require(totalFees != 0, "No fees available");
+        uint256 userFeeA = userAccumulatedSwapFees[msg.sender];
+        uint256 userFeeB = userAccumulatedSwapFees[msg.sender];
+        require(userFeeA != 0 || userFeeB != 0, "No fees to claim");
+        if (userFeeA != 0) {
             tokenA.safeTransfer(msg.sender, userFeeA);
             totalSwapFeesA -= userFeeA;
-        }
-
-        if (userFeeB > 0) {
+            userAccumulatedSwapFees[msg.sender] = 0;
+        }    
+        if (userFeeB != 0) {
             tokenB.safeTransfer(msg.sender, userFeeB);
             totalSwapFeesB -= userFeeB;
-        }
-
-        userAccumulatedSwapFees[msg.sender] += userFeeA + userFeeB;
-
-        emit SwapFeeClaimed(msg.sender, userFeeA + userFeeB);
+            userAccumulatedSwapFees[msg.sender] = 0;
     }
 
-
+    emit SwapFeeClaimed(msg.sender, userFeeA + userFeeB);
+    }
     function updateSwapFee(uint256 newFee) external onlyOwner {
         require(newFee <= 1000, "Fee too high");
         swapFeePercent = newFee;
@@ -327,9 +320,9 @@ contract CoFinance is ReentrancyGuard {
         liquidityToken.safeTransfer(msg.sender, liquidityMinted);
         userLiquidityBalance[msg.sender] += liquidityMinted;
         totalLiquidity += liquidityMinted;
-
         emit LiquidityProvided(msg.sender, tokenAAmount, tokenBAmount, liquidityMinted);
     }
+
 
     function calculateInitialLiquidity(uint256 tokenAAmount, uint256 tokenBAmount) internal pure returns (uint256) {
         return Math.sqrt(tokenAAmount * tokenBAmount);
@@ -349,10 +342,8 @@ contract CoFinance is ReentrancyGuard {
 
     function withdrawLiquidity(uint256 liquidityTokenAmount) external {
         require(liquidityTokenAmount != 0, "Liquidity token amount must be greater than 0");
-
         uint256 liquidityTotalSupply = liquidityToken.totalSupply();
         require(liquidityTotalSupply != 0, "No liquidity tokens in circulation");
-
         uint256 reserveA = tokenA.balanceOf(_thisAddress);
         uint256 reserveB = tokenB.balanceOf(_thisAddress);
         uint256 netReserveA = reserveA - totalSwapFeesA - totalCollateralA;
