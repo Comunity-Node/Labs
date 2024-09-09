@@ -127,7 +127,6 @@ contract CoFinanceFactory {
         if (tokenAddress == address(0)) {
             uint256 balance = thisAddress.balance;  // Use cached address
             require(balance > 0, "No ETH to withdraw");
-            // Use call instead of transfer
             (bool success, ) = owner.call{value: balance}("");
             require(success, "Transfer failed");
             emit FeesWithdrawn(owner, address(0), balance);
@@ -135,7 +134,6 @@ contract CoFinanceFactory {
             IERC20 token = IERC20(tokenAddress);
             uint256 balance = token.balanceOf(thisAddress); 
             require(balance > 0, "No ERC20 tokens to withdraw");
-            // Use call instead of transfer
             bool success = token.transfer(owner, balance);
             require(success, "Transfer failed");
             emit FeesWithdrawn(owner, tokenAddress, balance);
@@ -151,7 +149,6 @@ contract CoFinanceFactory {
                 count++;
             }
         }
-        
         address[] memory result = new address[](count);
         uint256 index = 0;
         for (uint256 i = 0; i < length; ++i) {
