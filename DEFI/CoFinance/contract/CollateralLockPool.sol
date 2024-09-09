@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 
 contract CollateralLockPool is ReentrancyGuard {
+
     IERC20 public tokenA;
     IERC20 public tokenB;
         mapping(address => uint256) public lockedCollateralA;
