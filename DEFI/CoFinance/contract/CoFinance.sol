@@ -204,26 +204,28 @@ contract CoFinance is ReentrancyGuard {
     }
 
     function repayLoan(uint256 amount) external {
-        require(amount != 0, "Amount must be greater than 0");
-        require(borrowed[msg.sender] >= amount, "Repayment exceeds borrowed amount");
-        
-        bool isTokenA = borrowedToken[msg.sender] == address(tokenA);
-        require(borrowedToken[msg.sender] != address(0), "No token borrowed");
-        
-        uint256 principalRepayment = amount;
-        uint256 interest = calculateInterest(principalRepayment, loanStartTime[msg.sender], loanDuration[msg.sender]);
-        uint256 totalRepayment = principalRepayment + interest;
-        
-        IERC20(borrowedToken[msg.sender]).safeTransferFrom(msg.sender, address(this), totalRepayment);
-        borrowed[msg.sender] -= principalRepayment;
-        distributeFees(interest, isTokenA);
-        
-        if (borrowed[msg.sender] == 0) {
-            releaseCollateral();
-        }
+    require(amount != 0, "Amount must be greater than 0");
+    require(borrowed[msg.sender] >= amount, "Repayment exceeds borrowed amount");
+    
+    bool isTokenA = borrowedToken[msg.sender] == address(tokenA);
+    require(borrowedToken[msg.sender] != address(0), "No token borrowed");
+    
+    uint256 principalRepayment = amount;
+    uint256 interest = calculateInterest(principalRepayment, loanStartTime[msg.sender], loanDuration[msg.sender]);
+    uint256 totalRepayment = principalRepayment + interest;
+    
+    IERC20(borrowedToken[msg.sender]).safeTransferFrom(msg.sender, address(this), totalRepayment);
+    borrowed[msg.sender] -= principalRepayment;
+    distributeFees(interest, isTokenA);
+    
+    if (borrowed[msg.sender] == 0) {
+        releaseCollateral();
+    }
 
     emit LoanRepaid(msg.sender, principalRepayment);
     }
+
+
 
     function releaseCollateral() internal {
         uint256 collateralAmount;
@@ -320,6 +322,7 @@ contract CoFinance is ReentrancyGuard {
         liquidityToken.safeTransfer(msg.sender, liquidityMinted);
         userLiquidityBalance[msg.sender] += liquidityMinted;
         totalLiquidity += liquidityMinted;
+
         emit LiquidityProvided(msg.sender, tokenAAmount, tokenBAmount, liquidityMinted);
     }
 
@@ -342,8 +345,10 @@ contract CoFinance is ReentrancyGuard {
 
     function withdrawLiquidity(uint256 liquidityTokenAmount) external {
         require(liquidityTokenAmount != 0, "Liquidity token amount must be greater than 0");
+
         uint256 liquidityTotalSupply = liquidityToken.totalSupply();
         require(liquidityTotalSupply != 0, "No liquidity tokens in circulation");
+
         uint256 reserveA = tokenA.balanceOf(_thisAddress);
         uint256 reserveB = tokenB.balanceOf(_thisAddress);
         uint256 netReserveA = reserveA - totalSwapFeesA - totalCollateralA;
